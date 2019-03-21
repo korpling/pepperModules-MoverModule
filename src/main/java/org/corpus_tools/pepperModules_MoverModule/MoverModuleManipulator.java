@@ -1,5 +1,6 @@
 package org.corpus_tools.pepperModules_MoverModule;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -17,6 +18,8 @@ import org.corpus_tools.salt.SALT_TYPE;
 import org.corpus_tools.salt.SaltFactory;
 import org.corpus_tools.salt.common.SCorpus;
 import org.corpus_tools.salt.common.SDocument;
+import org.corpus_tools.salt.common.SPointingRelation;
+import org.corpus_tools.salt.common.SStructuredNode;
 import org.corpus_tools.salt.common.SToken;
 import org.corpus_tools.salt.common.STextualDS;
 import org.corpus_tools.salt.core.GraphTraverseHandler;
@@ -74,14 +77,26 @@ public class MoverModuleManipulator extends PepperManipulatorImpl {
                         // set up module properties
                         String srcLayer = (String) getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.SRCLAYER, null);
                         String srcAnnoName = (String) getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.SRCANNO, null);
+                        String srcAnnoVal = (String) getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.SRCANNOVAL, null);
                         String srcAnnoNS = (String) getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.SRCANNONS, null);
                         String srcType = (String) getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.SRCTYPE, "edge");
-                        String srcName = (String) getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.SRCNAME, "dep");
+                        String srcName = (String) getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.SRCNAME, null);
                         String trgAnno = (String) getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.TRGANNO, null);
                         String trgAnnoVal = (String) getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.TRGANNOVAL, null);
-                        String trgNS = (String) getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.TRGNS, "default_ns");
+                        String trgNS = (String) getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.TRGNS, null);
+                        String trgLayer = (String) getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.TRGLAYER, null);
+                        String trgName = (String) getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.TRGNAME, null);
                         String trgObj = (String) getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.TRGOBJ, "target");
-                        
+
+                        boolean removeOrig = Boolean.valueOf(getProperties().getProperties().getProperty(MoverModuleManipulatorProperties.RMORIG)); 
+
+                        SLayer trgNodeLayer = null;
+                        if (trgLayer != null){
+                            trgNodeLayer = SaltFactory.createSLayer();
+                            trgNodeLayer.setName(trgLayer);
+                            getDocument().getDocumentGraph().addLayer(trgNodeLayer);
+                        }
+
                         
                         if (trgAnno == null){
                             if (srcAnnoName != null){
@@ -97,9 +112,70 @@ public class MoverModuleManipulator extends PepperManipulatorImpl {
                         }
 
                         
+                        
+                        if ("tok2node".equals(srcType)){
+                        
+                            // Get all tokens
+                            List<SToken> toks = getDocument().getDocumentGraph().getTokens();
+                            
+                            for (SToken tok : toks){
+                                // Get token annotations
+                                Set<SAnnotation> annos = tok.getAnnotations();
+                                Set<SAnnotation> toRemove = new HashSet<>();
+                                for (SAnnotation anno : annos){
+                                    if ((srcAnnoName == null || srcAnnoName.equals(anno.getName())) && (srcAnnoNS == null || srcAnnoNS.equals(anno.getNamespace()))){
+                                        // This is a targeted annotation, generate the structure to move annotation to
+                                        SNode n;
+                                        SRelation r;
+                                        if ("struct".equals(trgObj)){
+                                            n = SaltFactory.createSStructure();
+                                            r = SaltFactory.createSDominanceRelation();
+                                            if (trgNodeLayer != null){
+                                                r.addLayer(trgNodeLayer);
+                                            }
+                                        }
+                                        else{
+                                            n = SaltFactory.createSSpan();
+                                            r = SaltFactory.createSSpanningRelation();
+                                        }
+                                        if (trgNodeLayer != null){
+                                            n.addLayer(trgNodeLayer);                                            
+                                        }
+                                        String ns = trgNS;
+                                        String ann = trgAnno;
+                                        String val = trgAnnoVal;
+                                        if (trgNS == null){
+                                            ns = anno.getNamespace();
+                                        }
+                                        if (trgAnno == null){
+                                            ann = anno.getName();
+                                        }
+                                        if (trgAnnoVal == null){
+                                            val = anno.getValue_STEXT();
+                                        }
+                                        n.createAnnotation(ns, ann, val);
+                                        r.setSource(n);
+                                        r.setTarget(tok);
+                                        getDocument().getDocumentGraph().addNode(n);
+                                        getDocument().getDocumentGraph().addRelation(r);
+                                        if (removeOrig){
+                                            toRemove.add(anno);
+                                        }
+                                    }
+                                }
+                                for (SAnnotation anno : toRemove){
+                                    tok.removeLabel(anno.getNamespace(), anno.getName());
+                                }
+                            }
+                            
+                        }
+                        
+                        else{
                             // Get all relations in the document
                             List<SRelation> rels = getDocument().getDocumentGraph().getRelations(SALT_TYPE.SPOINTING_RELATION);
-                            for (SRelation rel: rels){
+                            Set<SRelation> relsToRemove = new HashSet<>();
+                            Set<SRelation> relsToAdd = new HashSet<>();
+                            for (SRelation rel: rels){                                                              
                                 // Check source layer
                                 if (srcLayer != null){
                                     boolean found = false;
@@ -151,19 +227,29 @@ public class MoverModuleManipulator extends PepperManipulatorImpl {
                                             else{
                                                 annoVal = srcAnno.getValue_STEXT();
                                             }
+                                            if (removeOrig){
+                                                ((SNode) rel.getSource()).removeLabel(srcAnnoNS,srcAnnoName);
+                                            }
                                         }
                                         else{
                                             boolean found = false;
                                             Set<SAnnotation> annos = ((SNode) rel.getSource()).getAnnotations();
                                             for (SAnnotation a : annos){
                                                 if (a.getName().equals(srcAnnoName)){
-                                                    annoVal = a.getValue_STEXT();                                                    
+                                                    annoVal = a.getValue_STEXT();
+                                                    found = true;
                                                 }
                                             }
                                             if (!found){
                                                 continue;
                                             }
                                         }
+                                        if (srcAnnoVal != null){
+                                            
+                                        }
+                                    }
+                                    else if ("edge2edge".equals(srcType)){
+                                        
                                     }
                                     else{
                                         throw new PepperModuleDataException(this, "Unknown move type: " + srcType +". Move type should be one of: edge, source2target");
@@ -176,22 +262,82 @@ public class MoverModuleManipulator extends PepperManipulatorImpl {
                                     throw new PepperModuleDataException(this, "No source annotation or fixed target annotation set - cannot assign null annotation");
                                 }
                                 SNode target;
+                                SNode source;
                                 if ("target".equals(trgObj)){
+                                    source = (SNode) rel.getSource();
                                     target = (SNode) rel.getTarget();
                                 }
                                 else {
+                                    source = (SNode) rel.getTarget();
                                     target = (SNode) rel.getSource();
                                 }
-                        if (true){
-                            //throw new PepperModuleDataException(this, "lyr: " + srcLayer + "; srcnm: "+srcName + "; trgNS: " + trgNS + "; trgAnno: " + trgAnno + "; trgVal: " + trgAnnoVal + "; trgObj: " + trgObj );
-                        }
-                                SAnnotation anno = SaltFactory.createSAnnotation();
-                                anno.setName(trgAnno);
-                                anno.setNamespace(trgNS);
-                                anno.setValue(annoVal);
-                                target.addAnnotation(anno);
+                                if (true){
+                                    //throw new PepperModuleDataException(this, "lyr: " + srcLayer + "; srcnm: "+srcName + "; trgNS: " + trgNS + "; trgAnno: " + trgAnno + "; trgVal: " + trgAnnoVal + "; trgObj: " + trgObj );
+                                }
+                                if ("edge2edge".equals(srcType)){
+                                    
+                                    boolean found = srcAnnoName == null ? true : false;
+                                    Set<SAnnotation> annos = rel.getAnnotations();
+                                    for (SAnnotation a : annos){
+                                        if (a.getName().equals(srcAnnoName)){
+                                            annoVal = a.getValue_STEXT();
+                                            found = true;
+                                        }
+                                    }
+                                    if (!found){
+                                        continue;
+                                    }
+                                    if (srcAnnoVal != null){
+                                        found = false;
+                                        for (SAnnotation a : annos){
+                                            if (a.getValue_STEXT().matches(srcAnnoVal)){
+                                                found = true;
+                                            }
+                                        }
+                                        if (!found){
+                                            continue;
+                                        }
+                                    }
+
+                                    SPointingRelation newRel = SaltFactory.createSPointingRelation();
+                                    newRel.setSource((SStructuredNode) source);
+                                    newRel.setTarget((SStructuredNode) target);
+                                    newRel.setType(trgName);
+                                    for (SAnnotation ann : rel.getAnnotations()){
+                                        String annNS = trgNS == null ? ann.getNamespace(): trgNS;
+                                        String annName = trgAnno == null ? ann.getName() : trgAnno;
+                                        String annVal = trgAnnoVal == null ? ann.getValue_STEXT() : trgAnnoVal;
+                                        newRel.createAnnotation(annNS, annName, annVal);
+                                    }
+                                    relsToAdd.add(newRel);
+                                    if (removeOrig){
+                                        relsToRemove.add(rel);
+                                    }
+                                }
+                                else{
+                                    SAnnotation anno = SaltFactory.createSAnnotation();
+                                    anno.setName(trgAnno);
+                                    anno.setNamespace(trgNS);
+                                    anno.setValue(annoVal);
+                                    target.addAnnotation(anno);
+                                }
                             }
-  
+                            
+                            for (SRelation r : relsToRemove){
+                                getDocument().getDocumentGraph().removeRelation(r);
+                            }
+                            for (SRelation r : relsToAdd){
+                                if (trgNodeLayer != null){
+                                    r.addLayer(trgNodeLayer);
+                                }
+                                getDocument().getDocumentGraph().addRelation(r);                                  
+                            }
+
+                            
+                        }
+ 
+                        
+                        
 			return (DOCUMENT_STATUS.COMPLETED);
 		}
 

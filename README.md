@@ -90,30 +90,59 @@ The manipulation process can be customized by using the properties listed in the
 
 |name of property			|possible values		|default value|
 |---------------------------|-----------------------|-------------|
-|Mover.annoNamespace			    |String	                |'default_ns'|
-|Mover.annoName			    |String	                |'tok_num'|
-|Mover.metaAnnoNamespace			    |String	                |NULL|
-|Mover.metaAnnoName			    |String	                |'tok_count'|
-|Mover.noCountAsMeta				    |true, false			|false|
-|Mover.noTokenNumbers	            |true, false			|false|
+|Mover.sourceType			    |{edge,source2target,tok2node,edge2edge}	                |'edge'|
+|Mover.sourceName			    |String	                |'dep'|
+|Mover.sourceLayer			    |String	                |NULL|
+|Mover.sourceAnno			    |String	                |'func'|
+|Mover.sourceAnnoVal			    |Regular expression	                |NULL|
+|Mover.sourceAnnoNamespace				    |String			|NULL|
+|Mover.targetObject	            |{source,target,span,struct}			|'target'|
+|Mover.targetNamespace	            |String			|NULL|
+|Mover.targetAnno	            |String			|NULL|
+|Mover.targetAnnoVal	            |String			|NULL|
+|Mover.targetLayer	            |String			|NULL|
+|Mover.targetName	            |String			|NULL|
+|Mover.removeOrig	            |Boolean			|false|
 
-### Mover.annoNamespace
-Specifies a namespace to add to token number annotations. (default: default_ns)
+### Mover.sourceType
+Specifies where the moved annotation comes from: an 'edge' (default), a node which is connected to the target by an edge (source2target), or a token annotation which should be moved to a new non-terminal node (tok2node).
 
-### Mover.annoName
-Specifies the annotation name for token numbers. (default: tok_num)
+### Mover.sourceName
+Specifies the name of the type of source object, i.e. an edge type if sourceType is 'edge' or 'source2target' (default: 'dep')
 
-### Mover.metaAnnoNamespace
-Specifies a namespace to add to token count meta annotation. (default: NULL)
+### Mover.sourceLayer
+Specifies a layer name to restrict source objects to. (default: NULL)
 
-### Mover.metaAnnoName
-Specifies the annotation name for token count meta annotation. (default: tok_count)
+### Mover.sourceAnno
+Specifies the annotation name to be moved (default: 'func')
 
-### Mover.noCountAsMeta
-Whether to leave out the metadatum with the count of tokens to each document. (default: false)
+### Mover.sourceAnnoVal
+A regular expression matching some annotation values of an edge as a condition for moving
 
-### Mover.noTokenNumbers
-If true, then tokens are not numbered (for cases where you only want metadata added). (default: false)
+### Mover.sourceAnnoNamespace
+Specifies the namespace of the annotation to be moved.
+
+### Mover.targetObject
+One of: source (move an edge annotation to the edge source node), target (the opposite), span (the new node type for tok2node), struct (for tok2node)
+
+### Mover.targetNamespace
+Namespace to assign to the new annotation. If unspecified, it will be copied from the source annotation.
+
+### Mover.targetAnno
+Annotation name to assign to the new annotation. If unspecified, it will be copied from the source annotation.
+
+### Mover.targetAnnoVal
+A fixed value to assign to the new annotation. If unspecified, it will be copied from the source annotation.
+
+### Mover.targetLayer
+A name to assign to the layer containing generated target objects (i.e. nodes above tokens in tok2node mode)
+
+### Mover.targetName
+A name to assign to the generated target objects (i.e. edge type in edge2edge mode)
+
+### Mover.removeOrig
+Whether to remove the original annotation after moving (default: false)
+
 
 ## Example workflows
 
@@ -149,10 +178,26 @@ Move a morphological token annotation to a span above that token:
 
 ```
 <manipulator name="Mover">
-  <property key="Mover.sourceType">tok2span</property>
-  <property key="Mover.sourceName">morph</property> <!-- this is  reserved value identifying tokens -->
+  <property key="Mover.sourceType">tok2node</property>
+  <property key="Mover.sourceName">morph</property>
   <property key="Mover.targetNamespace">morph_span</property> <!-- if unused, target NS will also be 'morph' -->
   <property key="Mover.targetAnno">morph_span</property> <!-- if unused, target annotation will also be 'morph' -->
   <property key="Mover.targetObject">span</property> <!-- can also use 'struct' -->
+  <property key="Mover.targetLayer">morph</property>
+</manipulator>
+```
+
+Split some annotated edges into a new edge type:
+
+```
+<manipulator name="Mover">
+	<property key="Mover.sourceType">edge2edge</property>
+	<property key="Mover.sourceLayer">ref</property> <!-- find edges from the layer ref -->
+	<property key="Mover.sourceAnno">type</property> <!-- make sure they have a type annotation -->
+	<property key="Mover.sourceAnnoVal">bridg.*</property> <!-- check that the annotation value matches bridg.* -->
+	<property key="Mover.targetName">bridge</property> <!-- for the matched edges, make a new edge type 'bridge' -->
+	<property key="Mover.targetLayer">bridge</property> <!-- place them in a layer 'bridge' -->
+	<property key="Mover.targetAnno">type</property> <!-- add an annotation 'type', copy value from original annotation if not specified -->
+	<property key="Mover.removeOrig">TRUE</property> <!-- delete the original matched edges -->
 </manipulator>
 ```
